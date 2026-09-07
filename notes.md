@@ -227,4 +227,19 @@ sudo systemctl reload apache2
 
 (accèder à **http://86.119.28.233/ (Ip de votre VM distante)** pour suivre l'assistant d'installation de WordPress avec les identifiants de la base de données créés précédemment dans MariaDB)
 
+# Image Site
+
 ![Screensite](images/img_site.png)
+
+---
+
+### Que manque-t-il pour que mon site soit opérationnel ? »
+
+Il manque un nom de domaine.
+
+Actuellement, le site est accessible uniquement via son adresse IP publique ce qui fonctionne techniquement mais présente plusieurs limites pour une mise en production réelle :
+
+Accessibilité : une IP brute est difficile à mémoriser et peu professionnelle comparée à une URL type www.monsite.com
+HTTPS impossible : l'obtention d'un certificat SSL (via Let's Encrypt par exemple) nécessite un nom de domaine - on ne peut pas sécuriser une connexion en HTTPS sur une simple IP
+Les moteurs de recherche indexent mal les sites accessibles uniquement par IP
+Crédibilité : un nom de domaine renforce la confiance des visiteurs
