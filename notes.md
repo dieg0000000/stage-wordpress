@@ -87,7 +87,7 @@ sudo nano /etc/apache2/sites-available/wordpress.conf
 
 **DocumentRoot** - changé de /var/www/html vers /var/www/wordpress
 
-Ajout d'un bloc Directory juste avant </VirtualHost>, pour autoriser les fichiers .htaccess (nécessaire pour les permaliens WordPress) :
+Ajout d'un bloc Directory juste avant `VirtualHost`, pour autoriser les fichiers .htaccess (nécessaire pour les permaliens WordPress) :
 
 ```
 <Directory /var/www/wordpress/>
@@ -227,4 +227,241 @@ sudo systemctl reload apache2
 
 (accèder à **http://86.119.28.233/ (Ip de votre VM distante)** pour suivre l'assistant d'installation de WordPress avec les identifiants de la base de données créés précédemment dans MariaDB)
 
+# Image Site
+
 ![Screensite](images/img_site.png)
+
+---
+
+### Que manque-t-il pour que mon site soit opérationnel ? »
+
+Il manque un nom de domaine.
+
+Actuellement, le site est accessible uniquement via son adresse IP publique ce qui fonctionne techniquement mais présente plusieurs limites pour une mise en production réelle :
+
+Accessibilité : une IP brute est difficile à mémoriser et peu professionnelle comparée à une URL type www.monsite.com
+HTTPS impossible : l'obtention d'un certificat SSL (via Let's Encrypt par exemple) nécessite un nom de domaine - on ne peut pas sécuriser une connexion en HTTPS sur une simple IP
+Les moteurs de recherche indexent mal les sites accessibles uniquement par IP
+Crédibilité : un nom de domaine renforce la confiance des visiteurs
+
+# Quatrième partie : développement avec Docker
+
+### 4.1 Installation de Docker
+
+```
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+```
+
+(Installe la clé de sécurité de Docker sur la machine, pour que le système puisse vérifier que les paquets Docker sont authentiques avant de les installer)
+
+```
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+```
+
+(Enregistre le dépôt Docker dans les sources apt)
+
+```
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+(Installe Docker)
+
+### 4.2 Création du dossier de travail et du fichier docker-compose.yml
+
+```
+mkdir ~/wp-docker-kit
+cd ~/wp-docker-kit
+```
+(Crée un dossier de travail dédié au kit de développement WordPress)
+
+Fichier `docker-compose.yml` créé à la racine du dossier :
+
+```
+services:
+db:
+image: mysql:8.0
+container_name: wp_db
+restart: unless-stopped
+environment:
+MYSQL_ROOT_PASSWORD: rootpassword
+MYSQL_DATABASE: wordpress
+MYSQL_USER: wp_user
+MYSQL_PASSWORD: wp_password
+volumes:
+- db_data:/var/lib/mysql
+networks:
+- wp_network
+
+wordpress:
+image: wordpress:latest
+container_name: wp_app
+restart: unless-stopped
+depends_on:
+- db
+ports:
+- "8080:80"
+environment:
+WORDPRESS_DB_HOST: db:3306
+WORDPRESS_DB_NAME: wordpress
+WORDPRESS_DB_USER: wp_user
+WORDPRESS_DB_PASSWORD: wp_password
+volumes:
+- ./wp_html:/var/www/html
+networks:
+- wp_network
+
+phpmyadmin:
+image: phpmyadmin:latest
+container_name: wp_phpmyadmin
+restart: unless-stopped
+depends_on:
+- db
+ports:
+- "8081:80"
+environment:
+PMA_HOST: db
+PMA_USER: root
+PMA_PASSWORD: rootpassword
+networks:
+- wp_network
+
+volumes:
+db_data:
+wp_data:
+
+networks:
+wp_network:
+```
+
+(Définit trois conteneurs : `db` pour la base de données MySQL, `wordpress` pour le CMS accessible sur le port 8080, et `phpmyadmin` pour l'administration de la base de données via navigateur sur le port 8081.)
+
+### 4.3 Références utilisées
+
+[Docker Hub - Image officielle WordPress](https://hub.docker.com/_/wordpress)
+
+[Docker Hub - Image officielle MySQL](https://hub.docker.com/_/mysql)
+
+[Docker Hub - Image officielle phpMyAdmin](https://hub.docker.com/_/phpmyadmin)
+
+[docker/awesome-compose - Exemple officiel WordPress](https://github.com/docker/awesome-compose/tree/master/official-documentation-samples/wordpress)
+
+[Documentation officielle Docker Compose](https://docs.docker.com/compose/)
+
+### 4.4 Lancement des conteneurs
+
+```
+sudo docker compose up -d
+```
+
+(Télécharge les images puis démarre les trois conteneurs)
+
+```
+sudo docker compose ps
+```
+(Affiche l'état des conteneurs du projet, permet de vérifier que `wp_db`, `wp_app` et `wp_phpmyadmin` sont bien en cours d'exécution)
+
+### 4.5 Accès aux services
+
+WordPress est accessible sur **http://localhost:8080** (assistant d'installation au premier lancement).
+
+phpMyAdmin est accessible sur **http://localhost:8081** avec l'utilisateur `root` et le mot de passe `rootpassword` défini dans le `docker-compose.yml`.
+
+### 4.6 Qu'est-ce que Docker et en quoi diffère-t-il de la virtualisation ?
+
+Docker est un outil qui permet d'empaqueter une application et tous ses outils dans un conteneur, qui peut tourner de façon identique sur n'importe quelle machine.
+
+La virtualisation simule un ordinateur complet via un hyperviseur, chaque VM embarque son propre système d'exploitation, ce qui la rend lourde et lente à démarrer.
+
+La conteneurisation, partage le noyau du système hôte et isole uniquement les processus, grâce aux mécanismes Linux. Un conteneur ne contient pas d'OS complet, seulement l'application et ses dépendances.
+
+### 4.7 Dockerfile, Docker et Docker Compose : quelle différence ?
+
+**Docker** c'est le moteur qui construit et exécute les conteneurs.
+
+**Un Dockerfile** c'est un fichier texte contenant les étapes pour construire une image, quelle image de base utiliser, quoi installer, quels fichiers copier, quelle commande lancer au démarrage.
+
+**Docker Compose** c'est un outil qui permet de gérer plusieurs conteneurs à partir d'un seul fichier `docker-compose.yml`, plutôt que de lancer chaque conteneur séparément avec des commandes `docker run`.
+
+### 4.8 Ports, volumes et environnements
+
+**Les ports** Une machine (physique ou virtuelle) n'a qu'une seule adresse IP, mais elle peut faire tourner plusieurs services en même temps : un serveur web, une base de données, un serveur SSH, etc. Le port permet de distinguer ces services entre eux sur une même machine et de s'y connecter. Quand une application démarre sur une machine, elle "écoute" sur un port donné, en attendant que quelqu'un s'y connecte.
+
+**Les volumes** assurent la persistance des données en dehors du cycle de vie du conteneur. Sans volume, toutes les données écrites à l'intérieur d'un conteneur disparaissent lorsque celui-ci est supprimé. Un volume peut aussi être un dossier de la machine hôte monté directement dans le conteneur (bind mount), ce qui permet par exemple d'éditer un fichier depuis son propre éditeur tout en le voyant appliqué dans le conteneur.
+
+**Les variables d'environnement** permettent de passer des paramètres de configuration au conteneur au démarrage (identifiants de base de données, mots de passe, etc.), sans les coder en dur dans l'image.
+
+### 4.9 Entrer dans un conteneur
+
+```
+sudo docker exec -it wp_app bash
+```
+
+(Ouvre un terminal interactif à l'intérieur du conteneur `wp_app`, permettant d'exécuter des commandes directement dans son système de fichiers. L'option `-it` combine mode interactif et allocation d'un pseudo-terminal)
+
+```
+exit
+```
+(Quitte le terminal du conteneur et revient sur la machine hôte)
+
+### 4.10 Ajout d'un plugin via un volume (Hello Dolly)
+
+```
+mkdir -p ~/wp-docker-kit/plugins/hello-dolly
+cd ~/wp-docker-kit/plugins/hello-dolly
+wget https://downloads.wordpress.org/plugin/hello-dolly.zip
+unzip hello-dolly.zip
+```
+
+(Crée le dossier pour les plugins, télécharge l'archive officielle du plugin Hello Dolly depuis wordpress.org, et l'extrait)
+
+Ajout d'une ligne dans la section `volumes` du service `wordpress` du fichier `docker-compose.yml` :
+
+```
+volumes:
+  - wp_data:/var/www/html
+  - ./plugins/hello-dolly:/var/www/html/wp-content/plugins/hello-dolly
+```
+
+(Monte le dossier local `plugins/hello-dolly` directement dans le dossier des plugins du conteneur WordPress.)
+
+```
+sudo docker compose up -d
+```
+
+(Redémarre les conteneurs avec la nouvelle configuration de volume appliquée)
+
+Le plugin Hello Dolly est ensuite visible et activable depuis **Extensions** dans l'interface d'administration WordPress (**http://localhost:8080/wp-admin**).
+
+### 4.11 Modification du plugin depuis la machine hôte
+
+Le fichier `hello.php` du plugin a été modifié directement depuis VS Code sur la machine hôte (remplacement du tableau de citations `$lyrics` par un texte personnalisé), sans jamais entrer dans le conteneur.         
+
+```
+sudo docker exec wp_app cat /var/www/html/wp-content/plugins/hello-dolly/hello.php
+```
+
+(Permet de vérifier depuis l'extérieur que la modification faite sur la machine hôte est bien visible à l'intérieur du conteneur.)
+
+![HelloDollyDocker](images/img_hello_dolly.png)
+
+### 4.13 Connexion à la base de données via un client SQL
+
+Connexion à phpMyAdmin (accessible sur **http://localhost:8081**), configuré directement dans le `docker-compose.yml` avec les identifiants `root` / `rootpassword`, permettant une connexion automatique sans écran de login.
+
+La base de données `wordpress` contient l'ensemble des tables générées par l'installation (utilisateurs, articles, commentaires, métadonnées, taxonomies, options, etc.), consultables et modifiables directement depuis l'interface.
+
+### 4.14 Diagramme entité-association (ERD)
+
+Diagramme de l'onglet **Designer** de phpMyAdmin, montrant l'ensemble des tables de la base `wordpress` et leurs relations (clés primaires, clés étrangères) :
+
+![ERD_WordPress](images/img_erd.png)
