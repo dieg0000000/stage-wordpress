@@ -394,7 +394,7 @@ La conteneurisation, partage le noyau du système hôte et isole uniquement les 
 
 ### 4.8 Ports, volumes et environnements
 
-**Les ports** Une machine (physique ou virtuelle) n'a qu'une seule adresse IP, mais elle peut faire tourner plusieurs services en même temps : un serveur web, une base de données, un serveur SSH, etc. Le port permet de distinguer ces services entre eux sur une même machine et de s'y connecter. Quand une application démarre sur une machine, elle "écoute" sur un port donné, en attendant que quelqu'un s'y connecte.
+**Les ports** définissent une correspondance entre un port de la machine hôte et un port à l'intérieur du conteneur. Par exemple `8080:80` signifie que le port 80 du conteneur est accessible depuis la machine hôte via le port 8080.
 
 **Les volumes** assurent la persistance des données en dehors du cycle de vie du conteneur. Sans volume, toutes les données écrites à l'intérieur d'un conteneur disparaissent lorsque celui-ci est supprimé. Un volume peut aussi être un dossier de la machine hôte monté directement dans le conteneur (bind mount), ce qui permet par exemple d'éditer un fichier depuis son propre éditeur tout en le voyant appliqué dans le conteneur.
 
