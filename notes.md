@@ -233,7 +233,7 @@ sudo systemctl reload apache2
 
 ---
 
-### Que manque-t-il pour que mon site soit opérationnel ? »
+### Que manque-t-il pour que mon site soit opérationnel ?
 
 Il manque un nom de domaine.
 
@@ -454,14 +454,256 @@ sudo docker exec wp_app cat /var/www/html/wp-content/plugins/hello-dolly/hello.p
 
 ![HelloDollyDocker](images/img_hello_dolly.png)
 
-### 4.13 Connexion à la base de données via un client SQL
+### 4.12 Connexion à la base de données via un client SQL
 
 Connexion à phpMyAdmin (accessible sur **http://localhost:8081**), configuré directement dans le `docker-compose.yml` avec les identifiants `root` / `rootpassword`, permettant une connexion automatique sans écran de login.
 
 La base de données `wordpress` contient l'ensemble des tables générées par l'installation (utilisateurs, articles, commentaires, métadonnées, taxonomies, options, etc.), consultables et modifiables directement depuis l'interface.
 
-### 4.14 Diagramme entité-association (ERD)
+### 4.13 Diagramme entité-association (ERD)
 
 Diagramme de l'onglet **Designer** de phpMyAdmin, montrant l'ensemble des tables de la base `wordpress` et leurs relations (clés primaires, clés étrangères) :
 
 ![ERD_WordPress](images/img_erd.png)
+
+# Cinquième partie : déploiement avec Docker (Ops)
+
+### 5.1 Installation Docker sur VM
+
+```
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+```
+
+(Même etape que sur la machine locale, installation du moteur Docker et de ses plugins)
+
+```
+sudo docker run hello-world
+```
+
+(Vérifie que Docker fonctionne correctement sur la VM)
+
+### 5.2 Récupération du kit de développement via Git
+
+```
+git config --global credential.helper store
+git clone https://github.com/dieg0000000/stage-wordpress.git
+```
+
+(Configure Git pour mémoriser les identifiants d'authentification, puis clone le dépôt contenant le `docker-compose.yml` et le plugin développé localement)
+
+### 5.3 Lancement de la stack WordPress en production
+
+```
+cd ~/stage-wordpress/wp-docker-kit
+sudo docker compose up -d
+```
+
+(Démarre les trois conteneurs `wp_db`, `wp_app`, `wp_phpmyadmin`, comme en local, à partir du même fichier `docker-compose.ym
+Le site est ensuite accessible via l'adresse IP publique de la VM sur le port 8080 : **http://86.119.28.233:8080**)
+
+```
+sudo docker compose ps
+```
+
+(Vérifie que les trois conteneurs sont bien à l'état "Up")
+
+### 5.4 Mon déploiement en production est-il en tout point similaire à celui sur mon ordinateur ?
+
+Oui, la procédure a été identique : même fichier `docker-compose.yml`, mêmes images Docker (`wordpress`, `mysql`, `phpmyadmin`), mêmes commandes de lancement. Seule différence : l'accès se fait via l'IP publique de la VM plutôt que `localhost`.
+
+
+### 5.5 Est-on prêt pour la prod ?
+
+**Emails** : WordPress a besoin d'envoyer des emails (mot de passe oublié, notifications, etc..). La fonction PHP mail() par défaut n'est pas fiable depuis un conteneur et nécessite une passerelle SMTP externe.
+
+**HTTPS** : C'est un fichier délivré par une autorité de certification qui prouve qu'un site appartient bien au domaine qu'il prétend représenter (Https). Nécessite un nom de domaine. (Partie 3)
+
+**PRA** : aucune sauvegarde automatisée actuellement, export régulier de la base MySQL + du dossier wp-content, stockés hors du serveur de production.
+
+**Qu'est-ce qu'un SSO ?** Authentification unique, l'utilisateur se connecte une fois pour accéder à plusieurs applications, via un fournisseur d'identité central (Tequila ou Entra-ID)
+
+### 5.6 Mise en place d'une passerelle SMTP
+
+**Création d'un compte de test Mailtrap**
+
+Inscription sur [mailtrap.io](https://mailtrap.io), puis récupération des identifiants SMTP depuis la Sandbox "My Sandbox" (onglet Integration) :
+
+```
+Host: sandbox.smtp.mailtrap.io
+Port: 2525
+Username: xxxxxxxxxxxxxx
+Password: xxxxxxxxxxxxxx
+```
+
+(Mailtrap intercepte les emails envoyés par l'application dans une boîte de réception de test, sans jamais les délivrer réellement vu que c'est  un sandbox, utile en environnement de développement.)
+
+**Installation d'un SMTP**
+
+Depuis l'administration WordPress, **Extensions → Ajouter une extension**, recherche de "WP Mail SMTP by WPForms", installation et activation.
+
+**Configuration**
+
+Dans **WP Mail SMTP Général**, service d'envoi réglé sur **"Autre SMTP"**, puis renseignement des paramètres suivants :
+Hébergeur SMTP : `sandbox.smtp.mailtrap.io`
+
+Cryptage : `TLS`
+
+Port SMTP : `2525`
+
+Authentification activée, avec l'identifiant et le mot de passe fournis par Mailtrap
+
+Nom et e-mail de l'expéditeur (adresse arbitraire, non utilisée réellement)
+
+**Test de fonctionnement**
+
+Déclenchement d'un email réel via la fonctionnalité "Mot de passe oublié" de WordPress (`/wp-login.php` -> mot de passe oublié), puis vérification de la bonne réception dans la boîte Mailtrap.
+
+### 5.7 Comment installer un SSO ?
+
+
+**Étapes générales pour l'installer sur WordPress :**
+
+**Récupérer les identifiants d'inscription** fournis par le fournisseur d'identité : Client ID, Client Secret
+
+**Installer un plugin WordPress compatible OIDC/SAML2** (comme miniOrange SSO, OneLogin)
+
+**Configurer le plugin** avec les identifiants récupérés à l'étape 1 (Client ID, Client Secret), afin que la connexion WordPress redirige vers l'authentification du fournisseur d'identité au lieu du login WordPress classique
+
+**Tester la connexion** en se déconnectant puis en cliquant sur le bouton de connexion via SSO, qui doit rediriger vers le fournisseur d'identité puis revenir sur WordPress une fois authentifié
+
+
+### 5.8 Comment mettre en place un certificat ?
+
+Ayant pas de nom de domaine, la mise en place d'un certificat n'est pas possible "Let's Encrypt" exige un domaine valide pour vérifier la propriété du site avant de délivrer un certificat (impossible sur une simple adresse IP). Voici néanmoins les étapes qui seraient suivies :
+
+**Réserver un nom de domaine** et créer un enregistrement DNS dirigeant vers l'IP publique du serveur (`86.119.28.233`)
+
+**Installer Certbot**, le client officiel de Let's Encrypt :
+
+```
+sudo apt install certbot python3-certbot-nginx
+```
+
+(la variante dépend du serveur web utilisé en frontal, ici `python3-certbot-nginx` pour un reverse proxy Nginx, ou `python3-certbot-apache` pour Apache)
+
+**Générer le certificat** pour le domaine :
+
+```
+sudo certbot --nginx -d mondomaine.com
+```
+
+(Certbot vérifie automatiquement la propriété du domaine via un défi HTTP ou DNS, obtient le certificat, puis configure automatiquement le serveur web pour l'utiliser)
+
+**Configurer la redirection HTTP vers HTTPS**, généralement proposée automatiquement par Certbot lors de l'étape précédente
+
+**Mettre en place le renouvellement automatique**, le certificat étant valable 90 jours :
+
+```
+sudo certbot renew --dry-run
+```
+
+(Certbot installe généralement une tâche planifiée qui renouvelle automatiquement le certificat avant son expiration)
+
+### 5.9 Comment mettre en place un PRA ?
+
+**Sauvegarder la base de données**
+
+```
+sudo docker exec wp_db mysqldump -u root -prootpassword wordpress > backup_$(date +%Y%m%d).sql
+```
+
+(Exporte toute la base de données dans un fichier SQL horodaté)
+
+**Sauvegarder les fichiers (wp-content, plugins, thèmes, médias uploadés)**
+
+```
+tar -czvf wp_content_backup_$(date +%Y%m%d).tar.gz ~/wp-docker-kit/wp_html/wp-content
+```
+
+(Compresse le dossier contenant tout le contenu généré par l'utilisateur — pas besoin de sauvegarder le cœur WordPress, il se retélécharge via l'image Docker)
+
+**Automatiser avec une tâche planifiée (cron)**
+
+```
+crontab -e
+```
+
+Ajout d'une ligne du type :
+
+```
+0 3 * * * /home/ubuntu/backup-wordpress.sh
+```
+
+(Exécute un script de sauvegarde chaque nuit à 3h, regroupant les deux commandes précédentes)
+
+**Tester la procédure de restauration**
+
+```
+sudo docker exec -i wp_db mysql -u root -prootpassword wordpress < backup_20260910.sql
+tar -xzvf wp_content_backup_20260910.tar.gz -C ~/wp-docker-kit/wp_html/
+```
+
+(Restaure respectivement la base de données et les fichiers. Un PRA sans test de restauration n'a pas de valeur : il faut vérifier périodiquement que la restauration fonctionne réellement)
+
+
+# Sixième partie: WordPress@EPFL
+
+Ce chapitre m'a appris que epfl.ch n'est pas un seul site, mais environ 1200 petits sites WordPress gérés séparément par les différentes unités de l'EPFL. Avec autant de sites, impossible de les mettre à jour un par un : à 8 sites/jour, ça prendrait environ 7 mois, alors que WordPress sort une nouvelle version tous les 4 mois, donc tout est mis à jour en masse, et seuls les cas particuliers sont traités à la main.
+
+Ce que j'ai retenu de ce chapitre, c'est surtout que la stack utilisée par l'EPFL est très proche de celle que j'ai mise en place pendant le stage : conteneurs, WordPress, base de données MySQL/MariaDB. La grosse différence, c'est l'échelle : au lieu d'un site tournant sur mon Docker Compose local, l'EPFL gère beaucoup de sites en même temps sur OpenShift (Kubernetes), avec du monitoring (Grafana, Prometheus, Kibana) et de l'automatisation (Ansible) pour tout gérer sans devoir s'occuper de chaque site un par un.
+
+Ça permet aussi de traiter les sites "en masse" plutôt qu'individuellement — logique vu qu'à 8 mises à jour par jour, il faudrait environ 7 mois pour tout parcourir, alors que WordPress sort une nouvelle version tous les 4 mois.
+
+# Dernière partie : wrap up
+
+### Alternatives à WordPress
+
+Si WordPress n'était pas utilisable, plusieurs CMS concurrents pourraient être envisagés :
+
+**Wix** : solution propriétaire "tout-en-un", hébergée, avec éditeur visuel par glisser-déposer, orientée utilisateurs non techniques
+
+**Shopify** : plateforme propriétaire spécialisée dans l'e-commerce, tout-en-un (hébergement, paiement, gestion de stock inclus)
+
+**Squarespace** : solution propriétaire hébergée, avec éditeur visuel simplifié, orientée vers les sites vitrines et portfolios
+
+### Licence, gratuité et modèle commercial
+
+**WordPress.com**, une offre d'hébergement freemium (plans gratuits limités, puis payants) construite sur le logiciel WordPress.org
+
+Des produits et extensions liés à l'écosystème WordPress : **Jetpack** (sécurité/performance), **WooCommerce** (e-commerce), **Akismet** (filtrage anti-spam), **WordPress VIP** (hébergement niveau entreprise)
+
+Du marketing d'affiliation (commissions sur des hébergeurs partenaires)
+
+Le logiciel WordPress lui-même reste donc entièrement gratuit et open source ; c'est autour de lui que se sont construits des services commerciaux payants.
+
+### Sites connus utilisant WordPress
+
+**SWI swissinfo.ch** : le service international de la Radio Télévision Suisse, qui utilise WordPress pour gérer environ 1 million d'images et 300'000 articles traduits en 10 langues.
+
+# Conclusion
+
+### Avantages et inconvénients de WordPress
+
+**Avantages** : gratuit et open source, immense écosystème de thèmes et plugins, communauté très large, facilité de prise en main pour la gestion de contenu, bonne documentation.
+
+**Inconvénients** :Les mises à jour fréquentes nécessitent une gestion importante, surtout à grande échelle les performances peuvent se dégrader sans mise en cache correcte.
+
+### WordPress est-il un bon choix pour l'EPFL ?
+
+Oui. Le fait que WordPress soit gratuit et open source, avec un immense écosystème de plugins et une communauté active, en fait un choix pertinent pour gérer des centaines de sites différents sans coût de licence. La complexité liée à la gestion de 1200 sites en parallèle est bien compensée par l'automatisation mise en place (OpenShift, Ansible), qui permet un traitement en masse plutôt qu'individuel. C'est donc un bon compromis entre flexibilité, coût et scalabilité pour les besoins de l'EPFL.
+
+### Bilan du stage
+
+Ce stage m'a permis d'apprendre énormément, que ce soit au niveau du vocabulaire technique ou de la pratique. Le fait de répéter les mêmes opérations concrètement (installation, configuration, débogage) m'a beaucoup aidé à assimiler les notions, plutôt que de simplement les lire. J'ai aussi pu approfondir certaines connaissances que j'avais déjà, mais que je ne maîtrisais pas encore complètement.
